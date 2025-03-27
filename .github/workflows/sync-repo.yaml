@@ -135,7 +135,7 @@ jobs:
           if ! git commit -m "Sync change from ${{ env.SOURCE_REPO }} merge
 
           Source PR: #${{ github.event.pull_request.number }}
-          Source commit ${{ github.sha }}";
+          Source commit ${{ github.sha }}"; then
             echo "Error: git commit failed"
             git status
             echo "Current directory contents"
