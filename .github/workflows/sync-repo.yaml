@@ -57,9 +57,19 @@ jobs:
         run: |
           cd dest-repo
           git fetch origin ${{env.DEST_BRANCH}}
-          git checkout ${{env.SYNC_BRANCH}} 
-          git pull origin ${{env.DEST_BRANCH}}
+          
+          # Check if the sync branch exists
+          if git show-ref --verify --quiet refs/remotes/origin/${{env.SYNC_BRANCH}}; then
+            # Branch exists, checkout and pull latest
+            git checkout ${{env.SYNC_BRANCH}}
+            git pull origin ${{env.DEST_BRANCH}}
+          else
+            # Branch doesn't exist, create it from destination branch
+            git checkout ${{env.DEST_BRANCH}}
+            git checkout -b ${{env.SYNC_BRANCH}}
+          fi
 
+          # Create a unique timestamped branch for this sync
           SYNC_BRANCH="sync/merge-$(date +%Y%m%d-%H%M%S)"
           git checkout -b $SYNC_BRANCH
           echo "SYNC_BRANCH=$SYNC_BRANCH" >> $GITHUB_ENV
