@@ -24,21 +24,22 @@ jobs:
 
       - name: Install yq
         run: |
-          sudo wget -q0 /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+          sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
           sudo chmod a+x /usr/local/bin/yq
         
       - name: Set environment variables from config
         run: |
-          SOURCE_REPO=$(yq r .github/sync-config.yaml repositories.source.name)
-          DEST_REPO=$(yq r .github/sync-config.yaml repositories.destination.name)
-          DEST_BRANCH=$(yq r .github/sync-config.yaml repositories.destination.default_branch)
-          SYNC_BRANCH=$(yq r .github/sync-config.yaml sync.default_branch_name)
-          EXCLUDE_DIRS=$(yq r .github/sync-config.yaml exclude.directories)
-          EXCLUDE_FILES=$(yq r .github/sync-config.yaml exclude.files)
-
-        echo "SOURCE_REPO: $SOURCE_REPO" >> $GITHUB_ENV
-        echo "DEST_REPO: $DEST_REPO" >> $GITHUB_ENV
-        echo "DEST_BRANCH: $DEST_BRANCH" >> $GITHUB_ENV
+          SOURCE_REPO=$(yq e '.repositories.source.name' .github/sync-config.yaml)
+          DEST_REPO=$(yq e '.repositories.destination.name' .github/sync-config.yaml)
+          DEST_BRANCH=$(yq e '.repositories.destination.default_branch' .github/sync-config.yaml)
+          SYNC_BRANCH=$(yq e '.sync.default_branch_name' .github/sync-config.yaml)
+          EXCLUDE_DIRS=$(yq e '.exclude.directories' .github/sync-config.yaml)
+          EXCLUDE_FILES=$(yq e '.exclude.files' .github/sync-config.yaml)
+          
+          echo "SOURCE_REPO=$SOURCE_REPO" >> $GITHUB_ENV
+          echo "DEST_REPO=$DEST_REPO" >> $GITHUB_ENV
+          echo "DEST_BRANCH=$DEST_BRANCH" >> $GITHUB_ENV
+          echo "SYNC_BRANCH=$SYNC_BRANCH" >> $GITHUB_ENV
 
       - name: Checkout destination repository
         uses: actions/checkout@v4
@@ -61,17 +62,17 @@ jobs:
 
           SYNC_BRANCH="sync/merge-$(date +%Y%m%d-%H%M%S)"
           git checkout -b $SYNC_BRANCH
-          echo "SYNC_BRANCH: $SYNC_BRANCH" >> $GITHUB_ENV
+          echo "SYNC_BRANCH=$SYNC_BRANCH" >> $GITHUB_ENV
 
       - name: Create exclusion file from config
         run: |
           touch exclude.txt
 
           echo "Adding directories to exclude:"
-          yq '.exclude.directories[]' .github/sync-config.yaml | tee -a exclude.txt
+          yq e '.exclude.directories[]' .github/sync-config.yaml | tee -a exclude.txt
 
           echo "Adding files to exclude:"
-          yq '.exclude.files[]' .github/sync-config.yaml | tee -a exclude.txt
+          yq e '.exclude.files[]' .github/sync-config.yaml | tee -a exclude.txt
 
       - name: Sync source to destination
         run: |
@@ -164,4 +165,3 @@ jobs:
           --body "This PR syncs changes from merged PR #${{ github.event.pull_request.number }} in ${{ env.SOURCE_REPO }}."
         env:
           GITHUB_TOKEN: ${{ secrets.GH_PAT }}
-
