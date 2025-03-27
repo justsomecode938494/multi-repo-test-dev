@@ -1,0 +1,16 @@
+repositories: 
+  source:
+    name: 'justsomecode938494/multi-repo-test-dev'
+    default_branch: 'main'
+  destination:
+    name: 'justsomecode938494/multi-repo-test-qa'
+    default_branch: 'main'
+
+sync:
+  default_branch_name: 'sync/dev-to-qa'
+
+exclude:
+  directories:
+    - ignore-dir
+  files:
+    - ignore-file.txt

@@ -1,0 +1,167 @@
+name: Sync Repository on Merge
+
+
+on:
+  pull_request:
+    types: [closed]
+    branches:
+      - main
+
+jobs:
+  sync-repos:
+    if: github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    permissions:
+      contents: 'write'
+      pull-requests: 'write'
+
+    steps:
+      - name: Checkout source repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GH_PAT}}
+
+      - name: Install yq
+        run: |
+          sudo wget -q0 /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+          sudo chmod a+x /usr/local/bin/yq
+        
+      - name: Set environment variables from config
+        run: |
+          SOURCE_REPO=$(yq r .github/sync-config.yaml repositories.source.name)
+          DEST_REPO=$(yq r .github/sync-config.yaml repositories.destination.name)
+          DEST_BRANCH=$(yq r .github/sync-config.yaml repositories.destination.default_branch)
+          SYNC_BRANCH=$(yq r .github/sync-config.yaml sync.default_branch_name)
+          EXCLUDE_DIRS=$(yq r .github/sync-config.yaml exclude.directories)
+          EXCLUDE_FILES=$(yq r .github/sync-config.yaml exclude.files)
+
+        echo "SOURCE_REPO: $SOURCE_REPO" >> $GITHUB_ENV
+        echo "DEST_REPO: $DEST_REPO" >> $GITHUB_ENV
+        echo "DEST_BRANCH: $DEST_BRANCH" >> $GITHUB_ENV
+
+      - name: Checkout destination repository
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.DEST_REPO }}
+          path: dest-repo
+          token: ${{ secrets.GH_PAT }}
+
+      - name: Configure Git
+        run: |
+          git config --global user.name 'GitHub Actions'
+          git config --global user.email 'actions@github.com'
+
+      - name: Create sync branch
+        run: |
+          cd dest-repo
+          git fetch origin ${{env.DEST_BRANCH}}
+          git checkout ${{env.SYNC_BRANCH}} 
+          git pull origin ${{env.DEST_BRANCH}}
+
+          SYNC_BRANCH="sync/merge-$(date +%Y%m%d-%H%M%S)"
+          git checkout -b $SYNC_BRANCH
+          echo "SYNC_BRANCH: $SYNC_BRANCH" >> $GITHUB_ENV
+
+      - name: Create exclusion file from config
+        run: |
+          touch exclude.txt
+
+          echo "Adding directories to exclude:"
+          yq '.exclude.directories[]' .github/sync-config.yaml | tee -a exclude.txt
+
+          echo "Adding files to exclude:"
+          yq '.exclude.files[]' .github/sync-config.yaml | tee -a exclude.txt
+
+      - name: Sync source to destination
+        run: |
+
+          # Create temp directory to store source repo
+          echo "Creating temp directory"
+          mkdir -p temp-filtered
+
+          BASE_DIR=$(pwd)
+
+          echo "Creating filtered copy of source files..."
+          if ! rsync -av --delete \
+            --itemize-changes \
+            --exclude-from=exclude.txt \
+            --exclude='.git' \
+            --exclude='dest-repo' \
+            --exclude='exclude.txt' \
+            . temp-filtered/; then
+            echo "Error: rsync failed"
+            exit 1
+          fi
+
+          echo "Content of temp-filtered directory:"
+          ls -la temp-filtered/
+
+          # Clean destination repo (preserve .git)
+          echo "Cleaning destination repo..."
+          cd "$BASE_DIR/dest-repo" || exit 1
+          find . -mindepth 1 -maxdepth 1 -not -name '.git' -exec rm -rf {} +
+
+          echo "Copying filtered files to destination repo..."
+          cp -r "$BASE_DIR/temp-filtered/." .
+
+          # Cleanup
+          echo "Cleaning up temp directory..."
+          rm -rf temp-filtered exclude.txt
+
+          # Commit changes
+          echo "Committing changes..."
+          cd "$BASE_DIR/dest-repo" || exit 1
+          git status
+
+          git add -A
+          echo "Git status after add:"
+          git status
+
+          echo "Debug: Files to be committed:"
+          git diff --cached --name-status
+
+          if ! git commit -m "Sync change from ${{ env.SOURCE_REPO }} merge
+
+          Source PR: #${{ github.event.pull_request.number }}
+          Source commit ${{ github.sha }}";
+            echo "Error: git commit failed"
+            git status
+            echo "Current directory contents"
+            ls -la
+            exit 0
+          fi
+
+          # Push changes
+          echo "Pushing changes..."
+          echo "Current branch state before push"
+          git status
+          git log --oneline -n 1
+
+
+          if ! git push origin $SYNC_BRANCH; then
+            echo "Error: git push failed"
+            git status
+            git log --oneline -n 1
+            git remote show origin
+            cd "$BASE_DIR" || exit 1
+            exit 1
+          fi
+
+          # Return to base directory
+          cd "$BASE_DIR" || exit 1
+
+          echo "Sync completed successfully"
+
+      - name: Create pull request
+        working-directory: dest-repo
+        run: |
+          git add -A
+          git diff-index --quiet HEAD || git commit -m "Ensure all changes are committed"
+
+          gh pr create --base ${{ env.DEST_BRANCH }} --head ${{ env.SYNC_BRANCH }} \
+          --title "Sync changes from ${{ env.SOURCE_REPO }} merge #${{ github.event.pull_request.number }}" \
+          --body "This PR syncs changes from merged PR #${{ github.event.pull_request.number }} in ${{ env.SOURCE_REPO }}."
+        env:
+          GITHUB_TOKEN: ${{ secrets.GH_PAT }}
+
